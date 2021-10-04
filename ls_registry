@@ -1,0 +1,57 @@
+#!/usr/bin/env ruby
+# usr/local/bin/ls_registry
+#
+# matt.a.feenstra@gmail.com
+# Licensed under GPLv3, all rights reserved.
+#
+# List the images hosted in a private Docker Registry.  Queries the
+#   Docker API provided by the system.  Accepts a command line argument
+#   or uses MY_REGISTRY for the connection.  Requires CURL to be
+#   on the system.
+
+require 'json'
+require 'colorize'
+require 'time'
+
+MY_REGISTRY = 'MY-DOCKER-REGISTRY-HOSTNAME.MY-DOMAIN.com:5000'
+API = 'v2'
+
+registry_host = if !ARGV.first.nil?
+                    ARGV.first.chomp.to_s
+                elsif !ENV['DOCKER_REGISTRY'].nil?
+                    ENV['DOCKER_REGISTRY']
+                else MY_REGISTRY end
+
+curl_stub = "curl -s #{registry_host}/#{API}"
+
+begin
+  c = `#{curl_stub}/_catalog`
+  catalog = JSON.parse c
+rescue => e
+  if ARGV.empty? 
+    puts "no command line args, is #{registry_host} available on the network?"
+  end
+  puts "\nERROR: while retrieving catalog from: " + registry_host.to_s.light_green
+  puts "#{c}\n#{e.full_message}\n\n"
+end
+repos = catalog['repositories']
+puts "\nImages from: ".light_yellow + registry_host.to_s.green +
+     "\n------------" + "\n\n"
+
+repos.each.with_index(1) do |r, i|
+  ret_val = JSON.parse(`#{curl_stub}/#{r}/tags/list`)
+  tags = ret_val['tags']
+  tags.each do |tag_name|
+    response = `#{curl_stub}/#{r}/manifests/#{tag_name}`
+    metadata = JSON.parse(response)
+    if defined?(metadata['errors'].first)
+      puts metadata.inspect.to_s.red
+      next
+    end
+    created_at = (Time.parse JSON.parse(metadata['history'].
+                  first['v1Compatibility'])['created']).localtime.ctime
+    puts "#{i}." + "\t#{r}".light_cyan + ':'.light_magenta +
+         tag_name.light_white + "\t\t" + created_at.green
+  end
+end
+puts
